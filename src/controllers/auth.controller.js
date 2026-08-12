@@ -1,0 +1,289 @@
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt'
+import cookie from 'cookie-parser'
+import usermodel from '../models/auth.model.js'
+import {config} from '../config/config.js';
+import sessionmodel from '../models/seccionmodel.js';
+import {generateOtp,getOtpHtml} from '../utils/utils.js'
+import  otpModel from '../models/otp.model.js'
+import { redisClient } from '../redis.js';
+import { emailQueue } from "../Queue.js";
+
+
+// Register API
+async function register(req,res,next) {
+    
+    try {
+    const { fullname, email, password } = req.body;
+    const find =await usermodel.findOne({
+       $or:[{email},{fullname}]
+    })
+    if (find) {
+        return res.status(404).json({
+            "message":"email already exist"
+        })
+    }
+
+     let otp=generateOtp();
+     let html=getOtpHtml(otp);
+    
+    const otphash = crypto.createHash("sha256").update(otp).digest("hex");
+    const hashpass = crypto.createHash("sha256").update(password).digest("hex");
+        const data=await usermodel.create({
+            name:fullname,email,password:hashpass
+        })
+        
+        //  await sendEmail(email,"otp verification",`your OTP code is ${otp}`,html);
+       
+   const job=  await emailQueue.add("send-otp", {email,otp,html});
+     await redisClient.set(`otp:${email}`, otp, "EX", 120);
+           await otpModel.create({  email,user:data._id,otphash:otphash })
+
+    //         const refreshtoken=await jwt.sign({
+    //           id:data._id
+    //         },process.env.JWT_SECRET,{expiresIn:"7d"})
+    //         res.cookie('refreshtoken',refreshtoken,{
+    //             httpOnly:true,
+    //             secure:true,
+    //             sameSite:"strict",
+    //             maxAge:7*24*60*60*1000
+    //         });
+
+    //        const refreshtokenhash =crypto.createHash("sha256").update(refreshtoken).digest("hex");
+    //        console.log(refreshtokenhash)
+    //         const session=await sessionmodel.create({
+    //             userId:data._id,refreshtoken:refreshtokenhash,ip:req.ip,userAgent:req.headers['user-agent']
+    //         })
+    //   const accesstoken=await jwt.sign({
+    //     id:data._id,
+    //     sessionId:session._id
+    // },process.env.JWT_SECRET,{expiresIn:"15m"});
+
+     res.status(200).json({
+        "message":"user created  successfully",
+        "data":data
+    })
+   await redisClient.set(`user:${data._id}`, JSON.stringify(data));
+}
+catch (err){
+     return res.status(200).json({
+        "message":err.message
+       
+})}};
+
+
+
+
+// logout
+const logout = async (req,res,next) => {
+    try{
+ const refreshtokenhash = crypto.createHash("sha256").update(req.user.token).digest("hex");
+    const logout=await sessionmodel.findOne({
+        refreshtoken:refreshtokenhash
+    })
+    if (!logout) {
+        return res.status(400).json({
+            "message":"refreshtoken not found"
+        })
+    }
+    if (logout.revoke) {
+        return res.status(400).json({"message":"user Already logout"});
+    }
+    logout.revoke = true;
+   
+   await logout.save();
+   res.clearCookie("refreshtoken");
+   res.status(200).json({"message":"user logged out successfully"});
+}
+catch(err){
+    next(err);
+}
+};
+
+
+
+// login API
+const login = async (req,res,next) => {
+    try{
+    const {email,fullname,password}=req.body;
+     const data = await usermodel.findOne({
+        $or:[{email},{name:fullname}]
+     });
+     if (!data) {
+        return res.status(401).json({"message":"invalid email or fullname"})
+     };
+      const hashpass = crypto.createHash("sha256").update(password).digest("hex");
+
+    if (data.password != hashpass) {
+        return res.status(401).json({message:"invalid password"})
+    }
+  
+
+    const refreshtoken=await jwt.sign({
+      id:data._id
+    },process.env.JWT_SECRET,{expiresIn:"7d"})
+    res.cookie('refreshtoken',refreshtoken,{
+        httpOnly:true,
+        secure:true,
+        samesite:"strict",
+        maxAge:7*24*60*60*1000
+    });
+   const refreshtokenhash = crypto.createHash("sha256").update(refreshtoken).digest("hex");
+    
+    await sessionmodel.create({
+        userId:data._id,refreshtoken:refreshtokenhash,ip:req.ip,userAgent:req.headers['user-agent']
+    })
+    const accesstoken=await jwt.sign({
+      id:data._id
+  },process.env.JWT_SECRET,{expiresIn:"15m"});
+
+    res.status(200).json({messagge:"user logged in successfully",
+        data:data,
+        token:accesstoken
+    })
+}
+catch(err){
+    next(err);
+}
+}
+
+
+
+// logout from All Device
+const logoutAll = async (req,res,next)=>{ 
+    try{
+
+const refreshtokenhash = crypto.createHash("sha256").update(req.user.token).digest("hex");
+
+console.log("refreshtokenhash",refreshtokenhash)
+
+const session = await sessionmodel.findOne({
+    refreshtoken: refreshtokenhash,
+    revoke: false
+});
+
+if (!session) {
+    return res.status(404).json({
+        message: "Session not found"
+    });
+}
+
+await sessionmodel.updateMany(
+    {
+        userId: session.userId,
+        revoke: false
+    },
+    {
+        revoke: true
+    }
+);
+
+res.clearCookie("refreshtoken");
+
+res.status(200).json({
+    message: "Logged out from all devices"
+});
+    }
+    catch(err){
+        next(err);
+    }
+}
+
+
+// verify-email
+const verify_email = async (req,res,next) => {
+    try{
+    const {otp,email} = req.body;
+   const otphash = crypto.createHash("sha256").update(otp).digest("hex");
+//     const find=await otpModel.findOne({
+//         otphash,email
+//     });
+//  if (!find) {
+//   return  res.status(400).json({"message":"otp invalid"});
+//  }
+const userotp= await redisClient.get(`otp:${email}`);
+    if (!userotp) {
+        return res.status(400).json({message:"otp expired"});
+    }
+    else if (userotp !== otp) {
+        return res.status(400).json({message:"otp invalid by redis"});
+    }
+  
+ const user=await usermodel.findOneAndUpdate({email:email},{verified:true},
+    { new: true })
+    console.log("User:", user);
+ await otpModel.deleteMany({user:user._id})
+ res.status(200).json({message:"email verified successfully",user:user});
+    }
+    catch(err){
+        next(err);
+    }
+}
+65
+
+// refresh token
+ const refreshtoken = async (req,res,next) => {
+    try{
+        console.log(req.user);
+    const refreshtokenhash = crypto.createHash("sha256").update(req.user.token).digest("hex");
+     const sessiondata=await sessionmodel.findOne({
+        refreshtoken:refreshtokenhash,
+        revoke:false
+     });
+     if (!sessiondata) {
+         return res.status(401).json({message:"login First"});
+     }
+
+    const data=jwt.verify(refreshtoken,process.env.JWT_SECRET);
+    if (!data) {
+         return res.status(401).json({message:"unauthorized user"});
+    }
+    console.log(data);
+      const accesstoken=await jwt.sign({
+        id:data.id
+    },process.env.JWT_SECRET,{expiresIn:"15m"});
+    const refreshtokken=await jwt.sign({
+        id:data.id
+    },process.env.JWT_SECRET,{expiresIn:"7d"});
+     res.cookie('refreshtoken',refreshtokken,{
+                httpOnly:true,
+                secure:true,
+                sameSite:"strict",
+                maxAge:7*24*60*60*1000
+            });
+    res.status(200).json({message:"access token refreshed successfully",token:accesstoken});
+        }
+       catch(err){
+        next(err);
+       } 
+}
+
+
+
+
+// get user data
+const getuser = async (req, res,next) => {
+    try {
+        const userData = await redisClient.get(`user:${req.user.id}`);
+        if (userData) {
+            return res.status(200).json({
+                message: "User found in Redis",
+                data:userData
+            });
+        }
+        const finddata=await usermodel.findById({_id:req.user.id});
+        if (!finddata) {
+            return res.status(404).json({message:"user not found"});
+        }
+        return res.status(200).json({
+            message: "User data retrieved successfully",
+            data:finddata
+        });
+
+    } catch (err) {
+       next(err);
+    }
+};
+
+export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout};

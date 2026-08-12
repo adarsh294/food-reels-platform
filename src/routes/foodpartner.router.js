@@ -1,0 +1,20 @@
+import foodpartner from "../controllers/foodpartner.controller.js";
+import { Router } from "express";
+import { validate } from "../middleware/auth.validate.js";
+import { foodpartnermiddleware } from "../middleware/food.middleware.js";
+import rateLimiter from "../middleware/ratelimit.js";
+import {auth} from "../middleware/auth.middleware.js";
+import upload from "../middleware/upload.js";
+import { createfood,getreels } from "../controllers/food.controller.js";
+export const foodrouter = Router();
+foodrouter.post("/register",validate,foodpartner.register);
+foodrouter.post("/login",rateLimiter,foodpartner.login);
+foodrouter.get("/getuser",foodpartnermiddleware,foodpartner.getuser);
+foodrouter.get("/logout",foodpartnermiddleware,foodpartner.logout);
+foodrouter.get("/logoutAll",foodpartnermiddleware,foodpartner.logoutAll);
+foodrouter.post("/verify-email",foodpartner.verify_email);
+foodrouter.get("/refresh",foodpartnermiddleware,foodpartner.refreshtoken);
+
+export const food=Router();
+food.post("/upload",foodpartnermiddleware,upload.single("vedio"),createfood);
+food.get("/reels",foodpartnermiddleware,getreels);
