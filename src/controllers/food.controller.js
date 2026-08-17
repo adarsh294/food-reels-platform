@@ -14,9 +14,21 @@ export const createfood = async (req,res,next) => {
 
 export const getreels = async (req,res,next) => {
     try {
-        const data=await foodmodel.find();
+
+        const data=await foodmodel.find().populate("foodpartner", "name email");
         res.status(200).json({message:"reels got successfully",data});
     } catch (error) {
         next(error);
+    }
+}
+export const getfoodpartner = async (req,res,next) =>{
+    try{
+    const {find} = req.body;
+    const data = await foodmodel.find({foodpartner:find}).populate("foodpartner", "name email");
+
+    res.status(200).json({message:"foodpartner found",data});
+    }
+    catch(err){
+        next(err);
     }
 }

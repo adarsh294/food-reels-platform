@@ -3,11 +3,11 @@ import jwt from "jsonwebtoken";
 import foodmodel from "../models/foodpartner.model.js";
 export const foodpartnermiddleware = async (req,res,next) => {
     try {
-        const token = req.cookies.refreshtoken;
+        const token = req.cookies.foodpartnerrefreshtoken;
            if (!token) {
             return res.status(401).json({message:"unauthorized User"});
            };
-         const data = jwt.verify(token, process.env.JWT_SECRET_food);
+         const data = jwt.verify(token, process.env.JWT_SECRET);
                if (!data) {
                 return res.status(401).json({message:"invalid token"});
                };
@@ -20,4 +20,4 @@ export const foodpartnermiddleware = async (req,res,next) => {
     } catch (error) {
         next(error);
     }
-}
+};

@@ -5,10 +5,9 @@ const otpSchema = new mongoose.Schema({
         type: String,
         required: [ true, "Email is required" ]
     },
-    user: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "user",
-        required: [ true, "User is required" ]
+    verified: {
+        type: Boolean,
+        default:false
     },
     otphash: {
         type: String,

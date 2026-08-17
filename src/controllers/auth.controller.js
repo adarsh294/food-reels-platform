@@ -9,37 +9,23 @@ import {generateOtp,getOtpHtml} from '../utils/utils.js'
 import  otpModel from '../models/otp.model.js'
 import { redisClient } from '../redis.js';
 import { emailQueue } from "../Queue.js";
-
+import axios from "axios";
 
 // Register API
 async function register(req,res,next) {
     
     try {
-    const { fullname, email, password } = req.body;
+    const { fullname, email, password ,otp} = req.body;
     const find =await usermodel.findOne({
-       $or:[{email},{fullname}]
+       email
     })
     if (find) {
-        return res.status(404).json({
+        return res.status(409).json({
             "message":"email already exist"
         })
     }
 
-     let otp=generateOtp();
-     let html=getOtpHtml(otp);
-    
-    const otphash = crypto.createHash("sha256").update(otp).digest("hex");
-    const hashpass = crypto.createHash("sha256").update(password).digest("hex");
-        const data=await usermodel.create({
-            name:fullname,email,password:hashpass
-        })
-        
-        //  await sendEmail(email,"otp verification",`your OTP code is ${otp}`,html);
-       
-   const job=  await emailQueue.add("send-otp", {email,otp,html});
-     await redisClient.set(`otp:${email}`, otp, "EX", 120);
-           await otpModel.create({  email,user:data._id,otphash:otphash })
-
+    //  await sendEmail(email,"otp verification",`your OTP code is ${otp}`,html);
     //         const refreshtoken=await jwt.sign({
     //           id:data._id
     //         },process.env.JWT_SECRET,{expiresIn:"7d"})
@@ -49,7 +35,7 @@ async function register(req,res,next) {
     //             sameSite:"strict",
     //             maxAge:7*24*60*60*1000
     //         });
-
+    
     //        const refreshtokenhash =crypto.createHash("sha256").update(refreshtoken).digest("hex");
     //        console.log(refreshtokenhash)
     //         const session=await sessionmodel.create({
@@ -59,21 +45,70 @@ async function register(req,res,next) {
     //     id:data._id,
     //     sessionId:session._id
     // },process.env.JWT_SECRET,{expiresIn:"15m"});
+    console.log("before")
+    const key = `otp:${email}`;
 
+const userotp = await redisClient.get(key);
+
+console.log("REDIS OTP:", userotp);
+   const verifyResponse = await axios.post(
+            "http://localhost:3000/api/user/verify_email",
+            {
+                email,
+                otp
+            }
+        );
+    const verify=await otpModel.findOne({email});
+    if (!verify) {
+        return res.status(400).json({message:"verify email first"})
+    }
+    if(verify.verified !== true){
+        return res.status(403).json({message:"email is not verified"})
+    }
+ 
+    const hashpass = crypto.createHash("sha256").update(password).digest("hex");
+        const data=await usermodel.create({
+            name:fullname,email,password:hashpass,verified:true
+        })
+        await otpModel.findOneAndDelete({email});
      res.status(200).json({
         "message":"user created  successfully",
         "data":data
     })
-   await redisClient.set(`user:${data._id}`, JSON.stringify(data));
+  
 }
 catch (err){
-     return res.status(200).json({
+    if (err.response) {
+      return res.status(err.response.status).json(
+        err.response.data
+      );
+    }
+     return res.status(500).json({
         "message":err.message
        
-})}};
+    })}};
+
+export const sendotp = async (req,res,next)=>{
+        const {email}=req.body;
+        const findemail=await otpModel.findOne({email});
+        let otp=generateOtp();
+        if(findemail){
+            await otpModel.deleteOne({email});
+         await redisClient.set(`otp:${email}`, String(otp), "EX", 300);
+         return  res.status(201).json({massage:"otp created successfully",data});
+        };
+     let html=getOtpHtml(otp);
+     const job=  await emailQueue.add("send-otp", {email,otp,html});
+   const key = `otp:${email}`;
+await redisClient.set(key, String(otp), "EX", 300);
 
 
-
+const check = await redisClient.get(key);
+console.log("redis check:", check);
+    const otphash = crypto.createHash("sha256").update(otp).digest("hex");
+      const data=  await otpModel.create({ email,otphash:otphash })
+        res.status(201).json({massage:"otp created successfully",data});
+}
 
 // logout
 const logout = async (req,res,next) => {
@@ -193,34 +228,33 @@ res.status(200).json({
 
 // verify-email
 const verify_email = async (req,res,next) => {
+    console.log(" VERIFY API HIT");
     try{
     const {otp,email} = req.body;
-   const otphash = crypto.createHash("sha256").update(otp).digest("hex");
-//     const find=await otpModel.findOne({
-//         otphash,email
-//     });
-//  if (!find) {
-//   return  res.status(400).json({"message":"otp invalid"});
-//  }
+    const otphash = crypto.createHash("sha256").update(otp).digest("hex");
+    
+    const find=await otpModel.findOne({
+        otphash,email
+    });
+ if (!find) {
+  return  res.status(400).json({"message":"verify email first"});
+ }
 const userotp= await redisClient.get(`otp:${email}`);
     if (!userotp) {
         return res.status(400).json({message:"otp expired"});
     }
     else if (userotp !== otp) {
-        return res.status(400).json({message:"otp invalid by redis"});
+        return res.status(400).json({message:"otp invalid"});
     }
   
- const user=await usermodel.findOneAndUpdate({email:email},{verified:true},
-    { new: true })
-    console.log("User:", user);
- await otpModel.deleteMany({user:user._id})
- res.status(200).json({message:"email verified successfully",user:user});
+ const data = await otpModel.findOneAndUpdate({email:email},{verified:true}, { returnDocument: "after" });
+
+ res.status(200).json({message:"email verified successfully"});
     }
     catch(err){
         next(err);
     }
 }
-65
 
 // refresh token
  const refreshtoken = async (req,res,next) => {
@@ -286,4 +320,4 @@ const getuser = async (req, res,next) => {
     }
 };
 
-export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout};
+export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout,sendotp};
