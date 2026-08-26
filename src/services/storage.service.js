@@ -19,4 +19,15 @@ const uploadFile = async (file,name) => {
     return response;
 };
 
+
+export const uploadprofile = async (file,name) => {
+    const response = await imagekit.files.upload({
+        file,
+        fileName: name,
+        folder:'profilepic'
+    });
+
+    return response;
+};
+
 export default uploadFile;

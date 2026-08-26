@@ -10,12 +10,12 @@ import  otpModel from '../models/otp.model.js'
 import { redisClient } from '../redis.js';
 import { emailQueue } from "../Queue.js";
 import axios from "axios";
-
+import {uploadprofile} from "../services/storage.service.js";
 // Register API
 async function register(req,res,next) {
     
     try {
-    const { fullname, email, password ,otp} = req.body;
+    const { fullname, email, password ,otp,address,profile} = req.body;
     const find =await foodpartnermodel.findOne({
        email
     })
@@ -24,7 +24,7 @@ async function register(req,res,next) {
             "message":"email already exist"
         })
     }
-
+   const result = await uploadprofile(req.file.buffer.toString("base64"),fullname);
     //  await sendEmail(email,"otp verification",`your OTP code is ${otp}`,html);
     //         const refreshtoken=await jwt.sign({
     //           id:data._id
@@ -38,44 +38,50 @@ async function register(req,res,next) {
     
     //        const refreshtokenhash =crypto.createHash("sha256").update(refreshtoken).digest("hex");
     //        console.log(refreshtokenhash)
-    //         const session=await sessionmodel.create({
-    //             userId:data._id,refreshtoken:refreshtokenhash,ip:req.ip,userAgent:req.headers['user-agent']
-    //         })
     //   const accesstoken=await jwt.sign({
-    //     id:data._id,
-    //     sessionId:session._id
-    // },process.env.JWT_SECRET,{expiresIn:"15m"});
-    console.log("before")
-    const key = `otp:${email}`;
-
-
-const userotp = await redisClient.get(key);
-
-console.log("REDIS OTP:", userotp);
-   const verifyResponse = await axios.post(
+        //     id:data._id,
+        //     sessionId:session._id
+        // },process.env.JWT_SECRET,{expiresIn:"15m"});
+        console.log("before")
+        const key = `otp:${email}`;
+        
+        
+        const userotp = await redisClient.get(key);
+        
+        console.log("REDIS OTP:", userotp);
+        const verifyResponse = await axios.post(
             "http://localhost:3000/api/user/verify_email",
-            {
-                email,
-                otp
-            }
+            {email, otp }
         );
-    const verify=await otpModel.findOne({email});
-    if (!verify) {
-        return res.status(400).json({message:"verify email first"})
-    }
-    if(verify.verified !== true){
-        return res.status(403).json({message:"email is not verified"})
-    }
- 
-    const hashpass = crypto.createHash("sha256").update(password).digest("hex");
+        const verify=await otpModel.findOne({email});
+        if (!verify) {
+            return res.status(400).json({message:"verify email first"})
+        }
+        if(verify.verified !== true){
+            return res.status(403).json({message:"email is not verified"})
+        }
+        
+        const hashpass = crypto.createHash("sha256").update(password).digest("hex");
         const data=await foodpartnermodel.create({
-            name:fullname,email,password:hashpass,verified:true
+            name:fullname,email,password:hashpass,verified:true,address,profile:result.url
         })
+         const refreshtoken=await jwt.sign({
+              id:data._id
+            },process.env.JWT_SECRET,{expiresIn:"7d"})
+            res.cookie('foodpartnerrefreshtoken',refreshtoken,{
+                httpOnly:true,
+                secure:true,
+                samesite:"strict",
+                maxAge:7*24*60*60*1000
+            });
         await otpModel.findOneAndDelete({email});
-     res.status(200).json({
-        "message":"user created  successfully",
-        "data":data
-    })
+        res.status(200).json({
+            "message":"user created  successfully",
+            "data":data
+        })
+        // const session=await sessionmodel.create({
+        //     userId:data._id,refreshtoken:refreshtokenhash,ip:req.ip,userAgent:req.headers['user-agent']
+        // })
   
 }
 catch (err){
@@ -312,8 +318,8 @@ const getuser = async (req, res,next) => {
                 message: "User found in Redis",
                 data:userData
             });
-        }
-        const finddata=await foodpartnermodel.findById({_id:req.foodPartner});
+        };
+        const finddata=await foodpartnermodel.find();
         if (!finddata) {
             return res.status(404).json({message:"user not found"});
         }
@@ -327,4 +333,25 @@ const getuser = async (req, res,next) => {
     }
 };
 
-export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout,sendotp};
+
+// follow API
+const follow = async (req,res,next) =>{
+    try {
+       const { find } = req.params;
+
+       if (!find) {
+         return res.status(400).json({ message: "Food partner id is required" });
+       }
+      const data = await foodpartnermodel.findById(find);
+       if (!data) {
+        return res.status(404).json({ message: "foodpartner not found" });
+       }
+       await foodpartnermodel.updateOne({ _id: find }, { $inc: { followers: 1 }}, { returnDocument: "after" });
+       res.status(200).json({ message: "follower increased", data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+
+export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout,sendotp,follow};

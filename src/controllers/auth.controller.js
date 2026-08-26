@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt'
-import cookie from 'cookie-parser'
 import usermodel from '../models/auth.model.js'
+import foodpartnermodel from '../models/foodpartner.model.js';
 import {config} from '../config/config.js';
 import sessionmodel from '../models/seccionmodel.js';
 import {generateOtp,getOtpHtml} from '../utils/utils.js'
@@ -26,15 +26,6 @@ async function register(req,res,next) {
     }
 
     //  await sendEmail(email,"otp verification",`your OTP code is ${otp}`,html);
-    //         const refreshtoken=await jwt.sign({
-    //           id:data._id
-    //         },process.env.JWT_SECRET,{expiresIn:"7d"})
-    //         res.cookie('refreshtoken',refreshtoken,{
-    //             httpOnly:true,
-    //             secure:true,
-    //             sameSite:"strict",
-    //             maxAge:7*24*60*60*1000
-    //         });
     
     //        const refreshtokenhash =crypto.createHash("sha256").update(refreshtoken).digest("hex");
     //        console.log(refreshtokenhash)
@@ -47,34 +38,43 @@ async function register(req,res,next) {
     // },process.env.JWT_SECRET,{expiresIn:"15m"});
     console.log("before")
     const key = `otp:${email}`;
-
-const userotp = await redisClient.get(key);
-
-console.log("REDIS OTP:", userotp);
-   const verifyResponse = await axios.post(
-            "http://localhost:3000/api/user/verify_email",
-            {
-                email,
+    
+    const userotp = await redisClient.get(key);
+    
+    console.log("REDIS OTP:", userotp);
+    const verifyResponse = await axios.post(
+        "http://localhost:3000/api/user/verify_email",
+        {
+            email,
                 otp
             }
         );
-    const verify=await otpModel.findOne({email});
-    if (!verify) {
-        return res.status(400).json({message:"verify email first"})
-    }
-    if(verify.verified !== true){
-        return res.status(403).json({message:"email is not verified"})
-    }
- 
-    const hashpass = crypto.createHash("sha256").update(password).digest("hex");
+        const verify=await otpModel.findOne({email});
+        if (!verify) {
+            return res.status(400).json({message:"verify email first"})
+        }
+        if(verify.verified !== true){
+            return res.status(403).json({message:"email is not verified"})
+        }
+        
+        const hashpass = crypto.createHash("sha256").update(password).digest("hex");
         const data=await usermodel.create({
             name:fullname,email,password:hashpass,verified:true
         })
         await otpModel.findOneAndDelete({email});
-     res.status(200).json({
-        "message":"user created  successfully",
-        "data":data
-    })
+        res.status(200).json({
+            "message":"user created  successfully",
+            "data":data
+        })
+        const refreshtoken=await jwt.sign({
+         id:data._id
+       },process.env.JWT_SECRET,{expiresIn:"7d"})
+       res.cookie('refreshtoken',refreshtoken,{
+           httpOnly:true,
+           secure:true,
+           samesite:"strict",
+           maxAge:7*24*60*60*1000
+       })
   
 }
 catch (err){
@@ -310,6 +310,7 @@ const getuser = async (req, res,next) => {
         if (!finddata) {
             return res.status(404).json({message:"user not found"});
         }
+
         return res.status(200).json({
             message: "User data retrieved successfully",
             data:finddata
@@ -320,4 +321,79 @@ const getuser = async (req, res,next) => {
     }
 };
 
-export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout,sendotp};
+const follow = async (req, res, next) => {
+    try {
+        const { find } = req.params;
+        let findata;
+         if( req.identify == "foodpartner"){
+          findata=await foodpartnermodel.findById(req.foodPartner);
+         }
+       else{
+           findata=await usermodel.findById(req.user.id);
+         }
+         if(findata.following.includes(find)){
+            findata.following.pull(find);
+             await findata.save();
+              let getdata=findata; 
+           const get= await foodpartnermodel.updateOne({ _id: find }, { $inc: { followers: -1 }},{ new: true });
+
+           return res.status(200).json({message:"unfollowed successfully",getdata});
+         }
+       findata.following.push(find);
+        await findata.save();
+        let getdata=findata;
+            const ress = await axios.get(
+              `http://localhost:3000/api/foodpartner/follower/${find}`,
+              { withCredentials: true }
+            );
+          
+        res.status(200).json({
+  message: "followed successfully",
+  data: getdata,
+  ress: ress.data
+});
+    } catch (err) {
+        console.log("FOLLOW ERROR:", err);
+        next(err);
+    }
+};
+
+const getfollower =async (req,res,next) =>{
+try { let find;
+        if (req.user) {
+           find = await usermodel.findById(req.user.id);
+        } 
+        else if (req.foodPartner) {
+          find = await foodpartnermodel.findById(req.foodPartner);
+        } 
+        else { return res.status(401).json({ message: "Unauthorized"})};
+          let data= find.following;
+          res.status(200).json({message:"folloers found",data})
+} catch (err) {
+    next(err);
+}
+};
+export const checkAuth = async (req, res,next) => {
+  if (req.user && req.foodPartner){
+     return res.status(200).json({
+        success: true,
+        message: "User is authenticated",
+        foodpartner: req.foodPartner
+    });
+  }
+   if(req.user){
+    return res.status(200).json({
+        success: true,
+        message: "User is authenticated",
+        user: req.user
+    });
+}
+else if(req.foodPartner){
+    return res.status(200).json({
+        success: true,
+        message: "User is authenticated",
+        foodpartner: req.foodPartner
+    });
+}
+};
+export default {register,login,refreshtoken,logoutAll,verify_email,getuser,logout,sendotp,follow,getfollower};

@@ -16,7 +16,13 @@ const userschema =mongoose.Schema({
       verified:{
         type:Boolean,
         default:false
+    },
+    following: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "foodPartner"
     }
+  ]
 },{
     timestamps:true
 });

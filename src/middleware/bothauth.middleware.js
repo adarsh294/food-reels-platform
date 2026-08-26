@@ -6,9 +6,6 @@ import usermodel from "../models/auth.model.js";
 export const bothAuth = async (req, res, next) => {
   try {
 
-    console.log("========== BOTH AUTH ==========");
-    console.log("COOKIES:", req.cookies);
-
     const userToken = req.cookies.refreshtoken;
 
     if (userToken) {
@@ -24,7 +21,7 @@ export const bothAuth = async (req, res, next) => {
         const user = await usermodel.findById(data.id);
 
         console.log("USER:", user);
-
+          req.identify="user";
         if (user) {
           req.user = {
             id: data.id,
@@ -61,7 +58,7 @@ export const bothAuth = async (req, res, next) => {
           await foodmodel.findById(data.id);
 
         console.log("FOOD PARTNER:", foodPartner);
-
+   req.identify="foodpartner";
         if (foodPartner) {
 
           req.foodPartner = data.id;
