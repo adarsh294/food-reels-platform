@@ -5,7 +5,7 @@ import { foodpartnermiddleware } from "../middleware/food.middleware.js";
 import rateLimiter from "../middleware/ratelimit.js";
 import { bothAuth } from "../middleware/bothauth.middleware.js";
 import upload from "../middleware/upload.js";
-import { createfood,getreels,getfoodpartner,toggleLike,Like,save,getsaved} from "../controllers/food.controller.js";
+import { createfood,getreels,getfoodpartner,toggleLike,Like,save,getsaved,getfoodpartnerreel} from "../controllers/food.controller.js";
 
 export const foodrouter = Router();
 foodrouter.post("/register",validate,upload.single("profile"),foodpartner.register);
@@ -25,3 +25,4 @@ food.post("/like/:reelId",bothAuth,toggleLike);
 food.get("/like",bothAuth,Like);
 food.get("/save",bothAuth,save);
 food.get("/getsave",bothAuth,getsaved);
+food.get("/getfoodpartner",getfoodpartnerreel);

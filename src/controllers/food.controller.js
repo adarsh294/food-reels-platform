@@ -3,6 +3,8 @@ import foodmodel from "../models/food.model.js";
 import uploadFile from "../services/storage.service.js";
 import { savemodel } from "../models/save.model.js";
 import mongoose from "mongoose";
+import { tryCatch } from "bullmq";
+import foodpartnermodel from "../models/foodpartner.model.js";
 export const createfood = async (req,res,next) => {
     try {
         const {name,description}=req.body;
@@ -180,7 +182,6 @@ export const Like = async (req, res, next) => {
 export const save = async (req, res, next) => {
     try {
         const { reel, food } = req.query;
-
         let userId;
         let userModel;
 
@@ -259,4 +260,44 @@ export const getsaved = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
+};
+
+
+export const getfoodpartnerreel = async (req, res, next) => {
+  try {
+    const { food } = req.query;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    const skip = (page - 1) * limit;
+
+    const finduser = await foodmodel.findById(food).populate("foodpartner","profile");
+    if (!finduser) {
+        res.status(404).json({message:"reel not found"});
+    }
+    const reels = await foodmodel.find({ _id: { $ne: food }}).select("_id vedio description name");
+    const total = await foodmodel.countDocuments();
+    const result = [finduser,...reels];
+    if (total === 0) {
+      return res.status(404).json({
+        message: "Foodpartner not found",
+      });
+    }
+
+    res.status(200).json({
+      message: "Foodpartner found",
+      data: result,
+      pagination: {
+        currentPage: page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPreviousPage: page > 1,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 };
